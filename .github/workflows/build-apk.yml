@@ -1,4 +1,3 @@
----
 # Build The Labelista APK — FREE route (no Play Console, no $25 fee)
 #
 # What this does:
@@ -6,22 +5,19 @@
 #      free-apk/twa-manifest.json with Bubblewrap.
 #   2. Builds a DEBUG APK with Gradle (signed with the auto-generated
 #      debug key). Installable on any Android phone, for testing.
-#   3. If release-signing secrets are set (see README section 5), it
-#      ALSO builds a signed RELEASE APK + AAB with the owner's keystore.
-#      Without those secrets the release step is skipped — the debug
-#      APK still builds. Nothing is uploaded to Google Play.
+#      Nothing is uploaded to Google Play.
+#      (A signed RELEASE build is added later, once the owner has a
+#      release keystore — see README section 5.)
 #
 # Cost: free on a public GitHub repo (GitHub Actions free tier).
 # Trigger: manually from the Actions tab, or automatically on a push
-#   that changes anything under free-apk/.
+# that changes anything under free-apk/.
 # Download: Actions tab -> this run -> Artifacts -> labelista-debug-apk
-#   (and labelista-release, only when the release secrets are set).
 #
-# NOTE — not yet run end-to-end: this workflow was written and
-# YAML/JSON-validated on 2026-11-12, but no GitHub repo, JDK or
-# Android SDK was available in the authoring environment, so the
-# first real run may need 1-2 small fixes (most likely around
-# Bubblewrap's icon fetch / interactive prompts — see README §7).
+# NOTE — v2 2026-11-12: the first version used `secrets` inside `if:`
+# conditions, which GitHub rejected at startup ("Unrecognized
+# named-value: 'secrets'"). The release steps were removed; this
+# workflow now builds the debug APK only.
 
 name: Build Labelista APK (free)
 
@@ -114,32 +110,9 @@ jobs:
           ./gradlew assembleDebug --stacktrace
           ls -lh app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Build signed RELEASE APK + AAB (only if release secrets exist)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        env:
-          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android.keystore
-          yes y | bubblewrap build --skipPwaValidation \
-            --signingKeyPath ./android.keystore \
-            --signingKeyAlias "${{ secrets.ANDROID_KEY_ALIAS }}"
-          ls -lh app-release-signed.apk app-release-bundle.aab
-          rm -f android.keystore
-
       - name: Upload DEBUG APK
         uses: actions/upload-artifact@v4
         with:
           name: labelista-debug-apk
           path: free-apk/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-
-      - name: Upload RELEASE APK + AAB
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: labelista-release
-          path: |
-            free-apk/app-release-signed.apk
-            free-apk/app-release-bundle.aab
-          retention-days: 90
