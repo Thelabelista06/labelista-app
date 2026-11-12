@@ -14,10 +14,13 @@
 # that changes anything under free-apk/.
 # Download: Actions tab -> this run -> Artifacts -> labelista-debug-apk
 #
-# NOTE — v3 2026-11-12: v2 used android-actions/setup-android@v3,
-# which fails because it runs `sdkmanager tools` and that package no
-# longer exists. Removed — ubuntu-latest already has the Android SDK
-# preinstalled (ANDROID_HOME is set by the runner).
+# NOTE — v4 2026-11-12: v3 failed at `test -f android/gradlew`.
+# Bubblewrap generates the project IN the current directory
+# (gradlew, app/, settings.gradle directly under free-apk/) — there
+# is NO android/ subfolder. Verified against @bubblewrap/core's
+# TwaGenerator.createTwaProject (copies gradlew to targetDirectory
+# itself). So the build runs ./gradlew in free-apk and the APK is at
+# free-apk/app/build/outputs/apk/debug/app-debug.apk.
 
 name: Build Labelista APK (free)
 
@@ -97,12 +100,11 @@ jobs:
           kill "$(cat /tmp/icon-server.pid)" || true
           cp twa-manifest.json.orig twa-manifest.json
           rm twa-manifest.json.orig
-          test -f android/gradlew
+          test -f gradlew
           echo "Android project generated"
 
       - name: Build DEBUG APK (free, no keystore needed)
         run: |
-          cd android
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
           ls -lh app/build/outputs/apk/debug/app-debug.apk
@@ -111,5 +113,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: labelista-debug-apk
-          path: free-apk/android/app/build/outputs/apk/debug/app-debug.apk
+          path: free-apk/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
