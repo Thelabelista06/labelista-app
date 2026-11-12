@@ -1,0 +1,13 @@
+# Bubblewrap-generated Android project — regenerated in CI from twa-manifest.json
+android/
+*.apk
+*.aab
+
+# Signing keystore — NEVER commit a real keystore or its passwords.
+# The release keystore lives only as a GitHub Actions secret (see README §5).
+*.keystore
+*.jks
+*.key
+
+node_modules/
+.bubblewrap/
