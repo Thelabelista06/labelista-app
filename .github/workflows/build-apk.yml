@@ -14,10 +14,10 @@
 # that changes anything under free-apk/.
 # Download: Actions tab -> this run -> Artifacts -> labelista-debug-apk
 #
-# NOTE — v2 2026-11-12: the first version used `secrets` inside `if:`
-# conditions, which GitHub rejected at startup ("Unrecognized
-# named-value: 'secrets'"). The release steps were removed; this
-# workflow now builds the debug APK only.
+# NOTE — v3 2026-11-12: v2 used android-actions/setup-android@v3,
+# which fails because it runs `sdkmanager tools` and that package no
+# longer exists. Removed — ubuntu-latest already has the Android SDK
+# preinstalled (ANDROID_HOME is set by the runner).
 
 name: Build Labelista APK (free)
 
@@ -62,9 +62,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
 
       - name: Install Bubblewrap CLI (pinned)
         run: npm install -g @bubblewrap/cli@1.24.1
