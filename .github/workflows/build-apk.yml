@@ -1,0 +1,145 @@
+---
+# Build The Labelista APK — FREE route (no Play Console, no $25 fee)
+#
+# What this does:
+#   1. Generates the Android (Trusted Web Activity) project from
+#      free-apk/twa-manifest.json with Bubblewrap.
+#   2. Builds a DEBUG APK with Gradle (signed with the auto-generated
+#      debug key). Installable on any Android phone, for testing.
+#   3. If release-signing secrets are set (see README section 5), it
+#      ALSO builds a signed RELEASE APK + AAB with the owner's keystore.
+#      Without those secrets the release step is skipped — the debug
+#      APK still builds. Nothing is uploaded to Google Play.
+#
+# Cost: free on a public GitHub repo (GitHub Actions free tier).
+# Trigger: manually from the Actions tab, or automatically on a push
+#   that changes anything under free-apk/.
+# Download: Actions tab -> this run -> Artifacts -> labelista-debug-apk
+#   (and labelista-release, only when the release secrets are set).
+#
+# NOTE — not yet run end-to-end: this workflow was written and
+# YAML/JSON-validated on 2026-11-12, but no GitHub repo, JDK or
+# Android SDK was available in the authoring environment, so the
+# first real run may need 1-2 small fixes (most likely around
+# Bubblewrap's icon fetch / interactive prompts — see README §7).
+
+name: Build Labelista APK (free)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'free-apk/**'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: free-apk
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Decode app icons (stored as base64 text, so the GitHub connector can push them)
+        run: |
+          python3 -c "import base64; [open(f'assets/{n}.png','wb').write(base64.b64decode(open(f'assets/{n}.png.b64').read())) for n in ('icon-512','icon-192')]"
+          ls -lh assets/
+
+      - name: Check manifests and icons are present
+        run: |
+          python3 -m json.tool manifest.webmanifest > /dev/null
+          python3 -m json.tool twa-manifest.json > /dev/null
+          test -f assets/icon-512.png
+          test -f assets/icon-192.png
+          echo "manifests OK, icons present"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Bubblewrap CLI (pinned)
+        run: npm install -g @bubblewrap/cli@1.24.1
+
+      - name: Point Bubblewrap at the JDK / Android SDK (no prompts)
+        run: |
+          mkdir -p ~/.bubblewrap
+          SDK_PATH="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          python3 - "$JAVA_HOME" "$SDK_PATH" <<'PY'
+          import json, os, sys
+          cfg = {"jdkPath": sys.argv[1], "androidSdkPath": sys.argv[2]}
+          with open(os.path.expanduser("~/.bubblewrap/config.json"), "w") as f:
+              json.dump(cfg, f)
+          print("bubblewrap config:", cfg)
+          PY
+
+      - name: Generate the Android project from twa-manifest.json
+        run: |
+          cp twa-manifest.json twa-manifest.json.orig
+          python3 - <<'PY'
+          import json
+          with open("twa-manifest.json") as f:
+              m = json.load(f)
+          m["iconUrl"] = "http://127.0.0.1:8765/icon-512.png"
+          m["maskableIconUrl"] = "http://127.0.0.1:8765/icon-512.png"
+          with open("twa-manifest.json", "w") as f:
+              json.dump(m, f, indent=2)
+          PY
+          (cd assets && python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/icon-server.log 2>&1 & echo $! > /tmp/icon-server.pid)
+          sleep 2
+          curl -sf http://127.0.0.1:8765/icon-512.png -o /dev/null
+          bubblewrap update --skipVersionUpgrade
+          kill "$(cat /tmp/icon-server.pid)" || true
+          cp twa-manifest.json.orig twa-manifest.json
+          rm twa-manifest.json.orig
+          test -f android/gradlew
+          echo "Android project generated"
+
+      - name: Build DEBUG APK (free, no keystore needed)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Build signed RELEASE APK + AAB (only if release secrets exist)
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android.keystore
+          yes y | bubblewrap build --skipPwaValidation \
+            --signingKeyPath ./android.keystore \
+            --signingKeyAlias "${{ secrets.ANDROID_KEY_ALIAS }}"
+          ls -lh app-release-signed.apk app-release-bundle.aab
+          rm -f android.keystore
+
+      - name: Upload DEBUG APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: labelista-debug-apk
+          path: free-apk/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Upload RELEASE APK + AAB
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: labelista-release
+          path: |
+            free-apk/app-release-signed.apk
+            free-apk/app-release-bundle.aab
+          retention-days: 90
